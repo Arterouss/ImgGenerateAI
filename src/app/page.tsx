@@ -403,7 +403,7 @@ export default function Home() {
                 <div style={{ display: "flex", alignItems: "center", gap: "14px", padding: "12px", borderRadius: "12px", background: "rgba(0,0,0,0.4)", border: "1px solid var(--border-glass)" }}>
                   <img src={editFilePreview} alt="Preview Upload" style={{ width: "56px", height: "56px", objectFit: "cover", borderRadius: "8px" }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ fontSize: "14px", fontWeight: 700, color: "#fff", truncate: true }}>{editFile?.name}</p>
+                    <p style={{ fontSize: "14px", fontWeight: 700, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{editFile?.name}</p>
                     <span style={{ fontSize: "12px", color: "var(--electric-lime)" }}>Siap untuk dimodifikasi</span>
                   </div>
                 </div>
