@@ -15,8 +15,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "TokenGo AI Hub | Image Generation, Edit & Chat",
-  description: "Aplikasi Web AI canggih dengan TokenGo API - Generate Gambar, Edit Gambar, & Chat Assistant",
+  title: "TokenGo AI Studio | Electric Bento AI Hub",
+  description: "Aplikasi Web AI Futuristik dengan TokenGo API - Vector Art Generator, Image Edit, & Chat Assistant 5M Tokens",
 };
 
 export default function RootLayout({
@@ -27,7 +27,10 @@ export default function RootLayout({
   return (
     <html lang="id">
       <body className={`${outfit.variable} ${inter.variable}`}>
-        <div className="ambient-glow" />
+        <div className="aurora-bg">
+          <div className="aurora-blob-1" />
+          <div className="aurora-blob-2" />
+        </div>
         <div className="app-container">
           {children}
         </div>
