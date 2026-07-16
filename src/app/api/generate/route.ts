@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next";
+import { NextRequest, NextResponse } from "next/server";
 
 // Helper function to call DeepSeek / Qwen to generate a stunning vector SVG artwork when DALL-E is not available
 async function generateSvgViaLlm(prompt: string, model: string, token: string, baseUrl: string) {
