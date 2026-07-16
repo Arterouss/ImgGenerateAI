@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+const DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
@@ -19,7 +21,8 @@ export async function POST(req: NextRequest) {
     const response = await fetch(`${baseUrl}/images/edits`, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${token}`
+        "Authorization": `Bearer ${token}`,
+        "User-Agent": DEFAULT_USER_AGENT
       },
       body: formData
     });
@@ -35,7 +38,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // SMART FALLBACK for Edit: if DALL-E 2 channel is blocked, fallback to DeepSeek Vector Studio
+    // SMART FALLBACK for Edit: if DALL-E 2 channel is blocked, fallback to Streaming DeepSeek Vector Studio
     if (!response.ok) {
       const errMsg = (data.error?.message || data.message || "").toLowerCase();
       if (
@@ -45,7 +48,7 @@ export async function POST(req: NextRequest) {
         response.status === 500 ||
         response.status === 400
       ) {
-        console.log(`[Smart Fallback Edit] Model dall-e-2 tidak aktif di channel TokenGo. Menggunakan DeepSeek V4 Pro Vector Edit...`);
+        console.log(`[Smart Fallback Edit] Model dall-e-2 tidak aktif di channel TokenGo. Menggunakan Streaming DeepSeek Vector Edit...`);
         try {
           const systemPrompt = `You are a world-class digital vector artist and graphic illustrator.
 The user wants to edit/transform a visual concept with the following instruction: "${prompt}".
@@ -59,7 +62,8 @@ RULES:
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              "Authorization": `Bearer ${token}`
+              "Authorization": `Bearer ${token}`,
+              "User-Agent": DEFAULT_USER_AGENT
             },
             body: JSON.stringify({
               model: "deepseek/deepseek-v4-pro",
@@ -67,21 +71,42 @@ RULES:
                 { role: "system", content: systemPrompt },
                 { role: "user", content: `Create a modified vector artwork based on instruction: ${prompt}` }
               ],
-              temperature: 0.8
+              temperature: 0.7,
+              max_tokens: 3000,
+              stream: true
             })
           });
 
-          const llmJson = await llmRes.json();
-          if (llmRes.ok && llmJson.choices?.[0]?.message?.content) {
-            const rawContent = llmJson.choices[0].message.content;
-            const svgMatch = rawContent.match(/<svg[\s\S]*?<\/svg>/i);
+          if (!llmRes.ok) {
+            throw new Error(`Fallback streaming status ${llmRes.status}`);
+          }
+
+          const reader = llmRes.body?.getReader();
+          if (reader) {
+            const decoder = new TextDecoder();
+            let accumulatedText = "";
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              const chunkStr = decoder.decode(value, { stream: true });
+              for (const line of chunkStr.split("\n")) {
+                const trimmed = line.trim();
+                if (trimmed.startsWith("data: ") && trimmed.slice(6).trim() !== "[DONE]") {
+                  try {
+                    const parsed = JSON.parse(trimmed.slice(6).trim());
+                    accumulatedText += parsed.choices?.[0]?.delta?.content || "";
+                  } catch (e) {}
+                }
+              }
+            }
+            const svgMatch = accumulatedText.match(/<svg[\s\S]*?<\/svg>/i);
             if (svgMatch) {
               const cleanSvg = svgMatch[0];
               const base64Svg = Buffer.from(cleanSvg, "utf-8").toString("base64");
               return NextResponse.json({
                 data: [{ url: `data:image/svg+xml;base64,${base64Svg}`, svg: cleanSvg }],
                 success: true,
-                fallback_notice: `⚠️ Channel DALL-E 2 belum aktif di akunmu. Sistem otomatis menghasilkan desain Vector AI menggunakan DeepSeek V4 Pro berdasarkan instruksimu!`
+                fallback_notice: `⚠️ Channel DALL-E 2 belum aktif di akunmu. Sistem otomatis menghasilkan desain Vector AI (Anti-Timeout Streaming) menggunakan DeepSeek V4 Pro!`
               });
             }
           }

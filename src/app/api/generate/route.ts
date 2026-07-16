@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// Helper function to call DeepSeek / Qwen to generate a stunning vector SVG artwork when DALL-E is not available
+const DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+// Helper function to call DeepSeek / GLM via streaming to prevent Cloudflare 524 Timeout & get instant SVG
 async function generateSvgViaLlm(prompt: string, model: string, token: string, baseUrl: string) {
-  const llmModel = model.includes("qwen") ? "qwen/qwen3.5-397b-a17b" : "deepseek/deepseek-v4-pro";
-  
+  let llmModel = "deepseek/deepseek-v4-pro";
+  if (model.includes("qwen")) llmModel = "qwen/qwen3.5-397b-a17b";
+  else if (model.includes("flash") || model.includes("fast")) llmModel = "deepseek/deepseek-v4-flash";
+  else if (model.includes("glm")) llmModel = "z-ai/glm-5.1";
+
   const systemPrompt = `You are a world-class digital artist, UI designer, and expert vector SVG illustrator.
 Your task is to create a visually stunning, vibrant, highly intricate, self-contained vector artwork in pure SVG format based on the user's prompt.
 RULES:
@@ -12,11 +17,13 @@ RULES:
 3. Use striking, vibrant colors, smooth linearGradient/radialGradient definitions, glow filters (<filter id="glow">), geometric depth, dynamic lighting, and rich layered shapes.
 4. Make the design feel premium, artistic, modern, and visually captivating.`;
 
+  // We use stream: true so Cloudflare never hits 524 Timeout!
   const response = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${token}`
+      "Authorization": `Bearer ${token}`,
+      "User-Agent": DEFAULT_USER_AGENT
     },
     body: JSON.stringify({
       model: llmModel,
@@ -24,28 +31,52 @@ RULES:
         { role: "system", content: systemPrompt },
         { role: "user", content: `Create a breathtaking, colorful vector SVG illustration for: "${prompt}"` }
       ],
-      temperature: 0.8
+      temperature: 0.7,
+      max_tokens: 3000,
+      stream: true
     })
   });
 
-  const responseText = await response.text();
-  let data;
-  try {
-    data = JSON.parse(responseText);
-  } catch (e) {
-    throw new Error(`Gagal memanggil AI SVG Studio: ${responseText}`);
-  }
-
   if (!response.ok) {
-    throw new Error(data.error?.message || data.message || `Error AI Vector Studio (Status ${response.status})`);
+    const errorText = await response.text();
+    throw new Error(`Error AI Vector Studio (Status ${response.status}): ${errorText.slice(0, 150)}`);
   }
 
-  const rawContent = data.choices?.[0]?.message?.content || "";
-  
-  // Extract pure <svg>...</svg> from content
-  const svgMatch = rawContent.match(/<svg[\s\S]*?<\/svg>/i);
+  // Read the stream chunk by chunk
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error("Gagal membaca aliran data (stream) dari server TokenGo.");
+  }
+
+  const decoder = new TextDecoder();
+  let accumulatedText = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    const chunkStr = decoder.decode(value, { stream: true });
+    const lines = chunkStr.split("\n");
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith("data: ")) {
+        const jsonStr = trimmed.slice(6).trim();
+        if (jsonStr === "[DONE]") continue;
+        try {
+          const parsed = JSON.parse(jsonStr);
+          const deltaContent = parsed.choices?.[0]?.delta?.content || "";
+          accumulatedText += deltaContent;
+        } catch (e) {
+          // Ignore incomplete json chunks in stream
+        }
+      }
+    }
+  }
+
+  // Extract pure <svg>...</svg> from accumulated content
+  const svgMatch = accumulatedText.match(/<svg[\s\S]*?<\/svg>/i);
   if (!svgMatch) {
-    throw new Error("AI berhasil merespons tetapi tidak menghasilkan format SVG yang valid.");
+    throw new Error("AI berhasil merespons tetapi tidak menghasilkan format SVG yang valid. Coba ulangi dengan prompt lebih singkat.");
   }
 
   const cleanSvg = svgMatch[0];
@@ -62,7 +93,7 @@ RULES:
       }
     ],
     success: true,
-    note: `Dilukis secara real-time menggunakan ${llmModel.split("/").pop()} Vector AI`
+    note: `Dilukis secara real-time (Anti-Timeout) menggunakan ${llmModel.split("/").pop()} Vector AI`
   };
 }
 
@@ -89,7 +120,7 @@ export async function POST(req: NextRequest) {
     }
 
     // If user explicitly chose AI Vector/SVG Art models, or if we want smart generation right away
-    if (model.includes("vector") || model.includes("deepseek") || model.includes("qwen") || model.includes("svg")) {
+    if (model.includes("vector") || model.includes("deepseek") || model.includes("qwen") || model.includes("svg") || model.includes("glm") || model.includes("flash")) {
       const svgResult = await generateSvgViaLlm(prompt, model, token, baseUrl);
       return NextResponse.json(svgResult);
     }
@@ -99,7 +130,8 @@ export async function POST(req: NextRequest) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${token}`
+        "Authorization": `Bearer ${token}`,
+        "User-Agent": DEFAULT_USER_AGENT
       },
       body: JSON.stringify({
         model,
@@ -122,7 +154,7 @@ export async function POST(req: NextRequest) {
     }
 
     // SMART FALLBACK: If DALL-E/FLUX is not enabled on this TokenGo key (model_not_found / 503 / 400 / 500),
-    // automatically fallback to generating a high-res AI Vector SVG Masterpiece using DeepSeek V4 Pro!
+    // automatically fallback to generating a high-res AI Vector SVG Masterpiece via Streaming!
     if (!response.ok) {
       const errMsg = (data.error?.message || data.message || "").toLowerCase();
       if (
@@ -132,12 +164,12 @@ export async function POST(req: NextRequest) {
         response.status === 500 ||
         response.status === 400
       ) {
-        console.log(`[Smart Fallback] Model ${model} tidak aktif di channel TokenGo. Mengalihkan ke DeepSeek V4 Pro Vector AI...`);
+        console.log(`[Smart Fallback] Model ${model} tidak aktif di channel TokenGo. Mengalihkan ke Streaming Vector AI...`);
         try {
           const fallbackResult = await generateSvgViaLlm(prompt, "deepseek/deepseek-v4-pro", token, baseUrl);
           return NextResponse.json({
             ...fallbackResult,
-            fallback_notice: `⚠️ Model ${model} belum diaktifkan oleh distributor di API Key kamu. Sistem otomatis mengalihkan ke DeepSeek V4 Pro Vector Studio dan berhasil melukis Vector Artwork ini!`
+            fallback_notice: `⚠️ Model ${model} belum diaktifkan oleh distributor di API Key kamu. Sistem otomatis mengalihkan ke Streaming DeepSeek Vector Studio (Anti-Timeout) dan berhasil melukis Vector Artwork ini!`
           });
         } catch (fallbackErr: any) {
           return NextResponse.json(
