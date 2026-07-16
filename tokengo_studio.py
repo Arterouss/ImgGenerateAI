@@ -66,13 +66,15 @@ def generate_vector_art(prompt, model="deepseek/deepseek-v4-pro"):
                         break
                     try:
                         chunk_data = json.loads(json_str)
-                        delta = chunk_data.get("choices", [{}])[0].get("delta", {}).get("content", "")
-                        if delta:
-                            accumulated_text += delta
-                            chunk_count += 1
-                            if chunk_count % 15 == 0:
-                                print(".", end="", flush=True)
-                    except json.JSONDecodeError:
+                        choices = chunk_data.get("choices")
+                        if choices and isinstance(choices, list) and len(choices) > 0:
+                            delta = choices[0].get("delta", {}).get("content", "")
+                            if delta:
+                                accumulated_text += delta
+                                chunk_count += 1
+                                if chunk_count % 15 == 0:
+                                    print(".", end="", flush=True)
+                    except (json.JSONDecodeError, IndexError, KeyError, TypeError):
                         pass
         print(f"\n✅ Selesai dalam {time.time() - start_time:.2f} detik!")
 
