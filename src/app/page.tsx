@@ -20,6 +20,7 @@ export default function Home() {
   
   // Image Generation State
   const [genPrompt, setGenPrompt] = useState<string>("");
+  const [genModel, setGenModel] = useState<string>("dall-e-3");
   const [genSize, setGenSize] = useState<string>("1024x1024");
   const [genQuality, setGenQuality] = useState<string>("standard");
   const [genLoading, setGenLoading] = useState<boolean>(false);
@@ -35,7 +36,7 @@ export default function Home() {
   const [editError, setEditError] = useState<string | null>(null);
 
   // Chat State
-  const [chatModel, setChatModel] = useState<string>("deepseek-v4-pro");
+  const [chatModel, setChatModel] = useState<string>("deepseek/deepseek-v4-pro");
   const [chatInput, setChatInput] = useState<string>("");
   const [chatMessages, setChatMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([
     { role: "assistant", content: "Halo! Saya siap membantu kamu coding, menganalisis ide, atau menjawab pertanyaan apa pun dengan kekuatan kuota 5 Juta Token TokenGo!" }
@@ -49,6 +50,22 @@ export default function Home() {
     "Desain antarmuka dashboard AI futuristik berbahan kaca transparan (glassmorphism), UI/UX modern"
   ];
 
+  // Safe JSON fetch helper
+  const safeFetchJson = async (url: string, options?: RequestInit) => {
+    const res = await fetch(url, options);
+    const rawText = await res.text();
+    let data;
+    try {
+      data = rawText ? JSON.parse(rawText) : {};
+    } catch (e) {
+      throw new Error(`Respons server bukan JSON (Status ${res.status}): ${rawText || "Kosong"}`);
+    }
+    if (!res.ok) {
+      throw new Error(data.error || `Error API (Status ${res.status})`);
+    }
+    return data;
+  };
+
   // Handle Image Generation
   const handleGenerateImage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -59,27 +76,23 @@ export default function Home() {
     setGenImage(null);
 
     try {
-      const res = await fetch("/api/generate", {
+      const data = await safeFetchJson("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: genPrompt,
+          model: genModel,
           size: genSize,
           quality: genQuality,
           apiKey: customApiKey || undefined
         })
       });
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || "Gagal membuat gambar");
-      }
-
       const imageUrl = data.data?.[0]?.url || (data.data?.[0]?.b64_json ? `data:image/png;base64,${data.data[0].b64_json}` : null);
       if (imageUrl) {
         setGenImage(imageUrl);
       } else {
-        throw new Error("URL gambar tidak ditemukan dalam respons API");
+        throw new Error(data.error || "URL gambar tidak ditemukan dalam respons API");
       }
     } catch (err: any) {
       setGenError(err.message);
@@ -115,21 +128,16 @@ export default function Home() {
         formData.append("apiKey", customApiKey);
       }
 
-      const res = await fetch("/api/edit", {
+      const data = await safeFetchJson("/api/edit", {
         method: "POST",
         body: formData
       });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || "Gagal mengedit gambar");
-      }
 
       const imageUrl = data.data?.[0]?.url || (data.data?.[0]?.b64_json ? `data:image/png;base64,${data.data[0].b64_json}` : null);
       if (imageUrl) {
         setEditResultImage(imageUrl);
       } else {
-        throw new Error("URL gambar hasil edit tidak ditemukan");
+        throw new Error(data.error || "URL gambar hasil edit tidak ditemukan");
       }
     } catch (err: any) {
       setEditError(err.message);
@@ -150,7 +158,7 @@ export default function Home() {
     setChatLoading(true);
 
     try {
-      const res = await fetch("/api/chat", {
+      const data = await safeFetchJson("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -160,12 +168,7 @@ export default function Home() {
         })
       });
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || "Gagal memproses chat");
-      }
-
-      const replyContent = data.choices?.[0]?.message?.content || "Tidak ada respons";
+      const replyContent = data.choices?.[0]?.message?.content || "Tidak ada respons dari model AI";
       setChatMessages([...newHistory, { role: "assistant", content: replyContent }]);
     } catch (err: any) {
       setChatMessages([...newHistory, { role: "assistant", content: `❌ Error: ${err.message}` }]);
@@ -264,6 +267,20 @@ export default function Home() {
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px" }}>
                 <div className="form-group">
+                  <label className="form-label">Model Gambar</label>
+                  <select 
+                    className="select-field"
+                    value={genModel}
+                    onChange={(e) => setGenModel(e.target.value)}
+                  >
+                    <option value="dall-e-3">DALL-E 3 (OpenAI Standard)</option>
+                    <option value="dall-e-2">DALL-E 2 (Fast)</option>
+                    <option value="flux">FLUX.1 Dev</option>
+                    <option value="midjourney">Midjourney Compatible</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
                   <label className="form-label">Ukuran Gambar</label>
                   <select 
                     className="select-field"
@@ -273,18 +290,6 @@ export default function Home() {
                     <option value="1024x1024">1024 x 1024 px</option>
                     <option value="512x512">512 x 512 px</option>
                     <option value="256x256">256 x 256 px</option>
-                  </select>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Kualitas</label>
-                  <select 
-                    className="select-field"
-                    value={genQuality}
-                    onChange={(e) => setGenQuality(e.target.value)}
-                  >
-                    <option value="standard">Standard (Cepat)</option>
-                    <option value="hd">HD (Detail Tinggi)</option>
                   </select>
                 </div>
               </div>
@@ -302,8 +307,14 @@ export default function Home() {
               </button>
 
               {genError && (
-                <div style={{ padding: "12px", borderRadius: "8px", background: "rgba(239, 68, 68, 0.15)", border: "1px solid rgba(239, 68, 68, 0.4)", color: "#fca5a5", fontSize: "13px" }}>
-                  ⚠️ Error: {genError}
+                <div style={{ padding: "14px", borderRadius: "8px", background: "rgba(239, 68, 68, 0.15)", border: "1px solid rgba(239, 68, 68, 0.4)", color: "#fca5a5", fontSize: "13px", lineHeight: "1.5" }}>
+                  ⚠️ <strong>Error dari Server TokenGo:</strong><br />
+                  {genError}
+                  {genError.includes("No available channel") && (
+                    <div style={{ marginTop: "8px", fontSize: "12px", opacity: 0.9 }}>
+                      💡 <em>Tip: Model image <code>{genModel}</code> belum diaktifkan atau tidak tersedia di channel API Key kamu saat ini. Coba pilih model lain atau gunakan fitur 💬 AI Chat & Coding yang sudah aktif!</em>
+                    </div>
+                  )}
                 </div>
               )}
             </form>
@@ -406,8 +417,9 @@ export default function Home() {
               </button>
 
               {editError && (
-                <div style={{ padding: "12px", borderRadius: "8px", background: "rgba(239, 68, 68, 0.15)", border: "1px solid rgba(239, 68, 68, 0.4)", color: "#fca5a5", fontSize: "13px" }}>
-                  ⚠️ Error: {editError}
+                <div style={{ padding: "14px", borderRadius: "8px", background: "rgba(239, 68, 68, 0.15)", border: "1px solid rgba(239, 68, 68, 0.4)", color: "#fca5a5", fontSize: "13px" }}>
+                  ⚠️ <strong>Error dari Server TokenGo:</strong><br />
+                  {editError}
                 </div>
               )}
             </form>
@@ -454,18 +466,21 @@ export default function Home() {
               <h2 className="card-title">
                 <MessageSquare size={20} color="var(--accent-blue)" /> AI Coding & Chat Assistant
               </h2>
-              <span className="badge-model">🤖 {chatModel}</span>
+              <span className="badge-model">🤖 {chatModel.split("/").pop()}</span>
             </div>
 
             <select 
               className="select-field" 
-              style={{ width: "220px", padding: "8px 12px", fontSize: "13px" }}
+              style={{ width: "260px", padding: "8px 12px", fontSize: "13px" }}
               value={chatModel}
               onChange={(e) => setChatModel(e.target.value)}
             >
-              <option value="deepseek-v4-pro">DeepSeek V4 Pro (Coding & Logic)</option>
-              <option value="claude-3-5-sonnet">Claude 3.5 Sonnet (Pro Agent)</option>
-              <option value="gpt-4o">GPT-4o (OpenAI Flagship)</option>
+              <option value="deepseek/deepseek-v4-pro">DeepSeek V4 Pro (Flagship Coding)</option>
+              <option value="deepseek/deepseek-v3.2">DeepSeek V3.2 (Advanced Logic)</option>
+              <option value="z-ai/glm-5.2">GLM-5.2 (Smart Reasoning)</option>
+              <option value="moonshotai/kimi-k2.6">Kimi K2.6 (Long Context)</option>
+              <option value="minimax/minimax-m2.7">MiniMax M2.7 (Agentic)</option>
+              <option value="qwen/qwen3.5-397b-a17b">Qwen 3.5 397B (Ultra Powerful)</option>
             </select>
           </div>
 

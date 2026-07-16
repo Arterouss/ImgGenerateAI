@@ -7,7 +7,6 @@ export async function POST(req: NextRequest) {
     const token = apiKey || process.env.TOKENGO_API_KEY || "TMTOMwR3tDcnY54QPLvtzq2YJC5H3hQ6lm7q6NxlLVeBmdvN";
     const baseUrl = process.env.TOKENGO_BASE_URL || "https://api.tokengo.com/v1";
 
-    // Remove client-only apiKey parameter before forwarding to external API
     if (formData.has("apiKey")) {
       formData.delete("apiKey");
     }
@@ -24,11 +23,20 @@ export async function POST(req: NextRequest) {
       body: formData
     });
 
-    const data = await response.json();
+    const responseText = await response.text();
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch (e) {
+      return NextResponse.json(
+        { error: `TokenGo API merespons dengan format bukan JSON (Status ${response.status}): ${responseText || "Kosong"}` },
+        { status: response.status || 500 }
+      );
+    }
 
     if (!response.ok) {
       return NextResponse.json(
-        { error: data.error?.message || "Gagal mengedit gambar di TokenGo API" },
+        { error: data.error?.message || data.message || `Gagal mengedit gambar (Status ${response.status})` },
         { status: response.status }
       );
     }
